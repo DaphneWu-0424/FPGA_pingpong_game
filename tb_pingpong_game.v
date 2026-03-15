@@ -88,12 +88,12 @@ module tb_pingpong_game;
         k1_charge_and_release(3);
         wait (score2 == 7'd1);
 
-        // 场景3：右侧故意提前释放，判提前击球，左侧加1分
+        // 场景3：左侧故意提前释放，判提前击球，右侧加1分
         @(posedge clk);
         k2_charge_and_release(20);
         wait (led == 8'b0001_0000);
         k1_charge_and_release(2);
-        wait (score1 == 7'd1);
+        wait (score2 == 7'd2);
 
         #200;
         $stop;
