@@ -1,5 +1,5 @@
 module key_processor #(
-    parameter integer DEBOUNCE_CYCLES = 500_000
+    parameter integer DEBOUNCE_CYCLES = 500_000 //消抖计数阈值，默认500000个周期
 )(
     input  wire        clk,
     input  wire        rst_n,
@@ -85,21 +85,21 @@ module key_filter #(
                     cnt      <= 32'd0;
                     hold_cnt <= 32'd0;
                     if (key_ff1 == 1'b0) begin
-                        state <= S_DB_PRESS;
+                        state <= S_DB_PRESS; //等待按键按下，一旦检测到，进入S_DB_PRESS状态并将cnt置为1
                         cnt   <= 32'd1;
                     end
                 end
 
-                S_DB_PRESS: begin
+                S_DB_PRESS: begin //按下消抖阶段
                     if (key_ff1 == 1'b0) begin
                         if (cnt < DEBOUNCE_CYCLES) begin
-                            cnt <= cnt + 1'b1;
+                            cnt <= cnt + 1'b1; //若保持低电平，则cnt递增，直到达到阈值周期数，才能确定稳定按下，进入S_PRESSED状态，同时清零cnt和hold_cnt
                         end else begin
-                            state    <= S_PRESSED;
+                            state    <= S_PRESSED; 
                             cnt      <= 32'd0;
                             hold_cnt <= 32'd0;
                         end
-                    end else begin
+                    end else begin //若中途有抖动，则返回等待状态
                         state <= S_IDLE;
                         cnt   <= 32'd0;
                     end
@@ -108,10 +108,10 @@ module key_filter #(
                 S_PRESSED: begin
                     if (key_ff1 == 1'b0) begin
                         if (hold_cnt != 32'hffff_ffff)
-                            hold_cnt <= hold_cnt + 1'b1;
+                            hold_cnt <= hold_cnt + 1'b1; //hold_cnt是确定按下之后持续按压的时间
                     end else begin
-                        flag        <= 1'b1;
-                        hold_cycles <= hold_cnt;
+                        flag        <= 1'b1; //若检测到变高，即按键释放，则产生疑似发球的flag脉冲
+                        hold_cycles <= hold_cnt; //将当前hold_cnt所存到输出hold_cycles，并进去S_WAIT_HIGH状态
                         state       <= S_WAIT_HIGH;
                         cnt         <= 32'd0;
                     end
