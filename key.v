@@ -126,6 +126,7 @@ module key_filter #(
                             cnt   <= 32'd0;
                         end
                     end else begin
+                        staet <= S_PRESSED;
                         cnt <= 32'd0;
                     end
                 end
