@@ -138,6 +138,7 @@ module key_filter #(
                             cnt <= cnt + 1'b1;
                         end
                     end else begin
+                        staet <= S_PRESSED;
                         cnt <= 32'd0;
                     end
                 end
