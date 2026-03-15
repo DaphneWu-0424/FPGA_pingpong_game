@@ -10,7 +10,7 @@ module seven_tube_drive (
     wire [3:0] data_4;
     wire [3:0] data_5;
 
-    show_data_sel u_show_data_sel (
+    show_data_sel show_data_sel_inst (
         .left_num (left_num),
         .right_num(right_num),
         .data_0   (data_0),
@@ -52,9 +52,8 @@ module single_seven_tube_drive (
             4'd7 : seven_segment = 7'b111_1000;
             4'd8 : seven_segment = 7'b000_0000;
             4'd9 : seven_segment = 7'b001_0000;
-            4'ha : seven_segment = 7'b011_1111; //显式横杠，g亮其余全灭
-            4'hf : seven_segment = 7'b111_1111; //显示空白，全灭
-            default: seven_segment = 7'b111_1111;
+            4'd10 : seven_segment = 7'b011_1111; //显式横杠，g亮其余全灭
+            default: seven_segment = 7'h7f;
         endcase
     end
 endmodule
@@ -73,7 +72,7 @@ module show_data_sel (
     wire [7:0] left_digits;
     wire [7:0] right_digits;
 
-    function [7:0] split_decimal_2digits; //输入7位数字，输出为8为，将0-99之间的数拆分为十位数字和个位数字，各自占据4位
+    function [7:0] split_decimal_2digits; //函数，输入一个数字，输出两个数字，将0-99之间的数拆分为十位数字和个位数字，各自占据4位
         input [6:0] num;
         begin
             if      (num >= 7'd90) split_decimal_2digits = {4'd9, num - 7'd90};

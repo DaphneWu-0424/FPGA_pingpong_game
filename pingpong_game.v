@@ -1,5 +1,5 @@
 module pingpong_game #(
-    parameter integer BALL_STEP_CYCLES = 3_000_000, //球移动一步所需的时钟周期数，决定基础速度
+    parameter integer BALL_STEP_CYCLES = 5_000_000, //球移动一步所需的时钟周期数，决定基础速度
     parameter integer DEBOUNCE_CYCLES  = 500_000,   //按键消抖计数周期
     parameter integer BEEP_CYCLES      = 5_000_000, //蜂鸣器响持续时间
     parameter integer HOLD_UNIT_CYCLES = 2_000_000, //按键按住时间单位，用于计算速度等级
@@ -88,7 +88,7 @@ module pingpong_game #(
 
     key_processor #(
         .DEBOUNCE_CYCLES(DEBOUNCE_CYCLES)
-    ) u_key_processor (
+    ) key_processor_inst (
         .clk              (clk),
         .rst_n            (rst_n),
         .kd1              (kd1),
@@ -99,7 +99,7 @@ module pingpong_game #(
         .hold_cycles_right(hold_cycles_right)
     );
 
-    seven_tube_drive u_seven_tube_drive (
+    seven_tube_drive seven_tube_drive_inst (
         .left_num     (score1),
         .right_num    (score2),
         .seven_segment(seven_segment)
@@ -120,7 +120,8 @@ module pingpong_game #(
             step_cnt <= step_cnt + 1'b1;
         end
     end
-
+    
+    //蜂鸣器延时关断电路
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             beep_cnt <= 32'd0;
