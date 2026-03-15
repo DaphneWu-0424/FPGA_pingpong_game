@@ -1,0 +1,15 @@
+# 先忽略所有 .v 文件
+*.v
+
+# 再单独放行这 4 个
+!key.v
+!pingpong_game.v
+!seven_tube_drive.v
+!tb_pingpong_game.v
+
+# 其他生成文件/目录
+*.bak
+*.wlf
+*.mti
+*.mpf
+work/

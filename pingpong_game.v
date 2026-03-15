@@ -1,0 +1,251 @@
+module pingpong_game #(
+    parameter integer BALL_STEP_CYCLES = 3_000_000,
+    parameter integer DEBOUNCE_CYCLES  = 500_000,
+    parameter integer BEEP_CYCLES      = 5_000_000,
+    parameter integer HOLD_UNIT_CYCLES = 2_000_000,
+    parameter integer SPEED_LEVEL_MAX  = 7,
+    parameter integer MIN_CROSS_COUNT  = 4
+)(
+    input  wire        clk,
+    input  wire        rst_n,
+    input  wire        kd1,
+    input  wire        kd2,
+    output wire [7:0]  led,
+    output reg  [6:0]  score1,
+    output reg  [6:0]  score2,
+    output wire        beep,
+    output wire [41:0] seven_segment
+);
+    wire        flag_left;
+    wire        flag_right;
+    wire [31:0] hold_cycles_left;
+    wire [31:0] hold_cycles_right;
+
+    reg         running;
+    reg         dir;
+    reg [2:0]   ball_pos;
+    reg [3:0]   speed_level;
+    reg [3:0]   travel_count;
+    reg [31:0]  step_cnt;
+    reg [31:0]  beep_cnt;
+    reg         beep_start;
+    reg         step_restart;
+
+    wire [31:0] current_step_cycles;
+    wire        step_tick;
+
+    function [6:0] score_inc_sat;
+        input [6:0] score_in;
+        begin
+            if (score_in < 7'd99)
+                score_inc_sat = score_in + 1'b1;
+            else
+                score_inc_sat = score_in;
+        end
+    endfunction
+
+    function [3:0] hold_to_speed;
+        input [31:0] hold_cycles_in;
+        reg   [31:0] q;
+        begin
+            if (HOLD_UNIT_CYCLES <= 0) begin
+                hold_to_speed = SPEED_LEVEL_MAX;
+            end else begin
+                q = hold_cycles_in / HOLD_UNIT_CYCLES;
+                if (q >= (SPEED_LEVEL_MAX - 1))
+                    hold_to_speed = SPEED_LEVEL_MAX;
+                else
+                    hold_to_speed = q[3:0] + 4'd1;
+            end
+        end
+    endfunction
+
+    function [31:0] speed_to_step_cycles;
+        input [3:0] spd;
+        reg   [31:0] factor;
+        begin
+            if (spd >= SPEED_LEVEL_MAX)
+                factor = 32'd1;
+            else if (spd <= 4'd1)
+                factor = SPEED_LEVEL_MAX;
+            else
+                factor = SPEED_LEVEL_MAX + 1 - spd;
+
+            speed_to_step_cycles = BALL_STEP_CYCLES * factor;
+        end
+    endfunction
+
+    assign current_step_cycles = speed_to_step_cycles(speed_level);
+    assign step_tick           = running && (step_cnt >= current_step_cycles - 1'b1);
+    assign led                 = running ? (8'b0000_0001 << ball_pos) : 8'b0000_0000;
+    assign beep                = (beep_cnt != 32'd0);
+
+    key_processor #(
+        .DEBOUNCE_CYCLES(DEBOUNCE_CYCLES)
+    ) u_key_processor (
+        .clk             (clk),
+        .rst_n           (rst_n),
+        .kd1             (kd1),
+        .kd2             (kd2),
+        .flag_left       (flag_left),
+        .flag_right      (flag_right),
+        .hold_cycles_left(hold_cycles_left),
+        .hold_cycles_right(hold_cycles_right)
+    );
+
+    seven_tube_drive u_seven_tube_drive (
+        .left_num     (score1),
+        .right_num    (score2),
+        .seven_segment(seven_segment)
+    );
+
+    always @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            step_cnt <= 32'd0;
+        end else if (!running) begin
+            step_cnt <= 32'd0;
+        end else if (step_restart) begin
+            step_cnt <= 32'd0;
+        end else if (step_tick) begin
+            step_cnt <= 32'd0;
+        end else begin
+            step_cnt <= step_cnt + 1'b1;
+        end
+    end
+
+    always @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            beep_cnt <= 32'd0;
+        end else if (beep_start) begin
+            if (BEEP_CYCLES > 0)
+                beep_cnt <= BEEP_CYCLES;
+            else
+                beep_cnt <= 32'd0;
+        end else if (beep_cnt != 32'd0) begin
+            beep_cnt <= beep_cnt - 1'b1;
+        end
+    end
+
+    always @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            running      <= 1'b0;
+            dir          <= 1'b1;
+            ball_pos     <= 3'd0;
+            speed_level  <= 4'd1;
+            travel_count <= 4'd0;
+            score1       <= 7'd0;
+            score2       <= 7'd0;
+            beep_start   <= 1'b0;
+            step_restart <= 1'b0;
+        end else begin
+            beep_start   <= 1'b0;
+            step_restart <= 1'b0;
+
+            if (!running) begin
+                travel_count <= 4'd0;
+                speed_level  <= 4'd1;
+
+                if (flag_left) begin
+                    running      <= 1'b1;
+                    dir          <= 1'b1;
+                    ball_pos     <= 3'd0;
+                    speed_level  <= hold_to_speed(hold_cycles_left);
+                    travel_count <= 4'd0;
+                    step_restart <= 1'b1;
+                end else if (flag_right) begin
+                    running      <= 1'b1;
+                    dir          <= 1'b0;
+                    ball_pos     <= 3'd7;
+                    speed_level  <= hold_to_speed(hold_cycles_right);
+                    travel_count <= 4'd0;
+                    step_restart <= 1'b1;
+                end
+            end else begin
+                /*
+                 * 回球时采用“按下蓄力、松开击球”的方式：
+                 * - 释放得越晚，hold_cycles 越大，初速度越快
+                 * - 若在本方底线到来之前提前释放，则判提前击球，对方得分
+                 */
+                if (dir && flag_right) begin
+                    if (ball_pos == 3'd7) begin
+                        dir          <= 1'b0;
+                        ball_pos     <= 3'd6;
+                        speed_level  <= hold_to_speed(hold_cycles_right);
+                        travel_count <= 4'd0;
+                        step_restart <= 1'b1;
+                    end else begin
+                        score1       <= score_inc_sat(score1);
+                        running      <= 1'b0;
+                        speed_level  <= 4'd1;
+                        travel_count <= 4'd0;
+                        beep_start   <= 1'b1;
+                    end
+                end else if (!dir && flag_left) begin
+                    if (ball_pos == 3'd0) begin
+                        dir          <= 1'b1;
+                        ball_pos     <= 3'd1;
+                        speed_level  <= hold_to_speed(hold_cycles_left);
+                        travel_count <= 4'd0;
+                        step_restart <= 1'b1;
+                    end else begin
+                        score2       <= score_inc_sat(score2);
+                        running      <= 1'b0;
+                        speed_level  <= 4'd1;
+                        travel_count <= 4'd0;
+                        beep_start   <= 1'b1;
+                    end
+                end else if (step_tick) begin
+                    if (dir) begin
+                        if (ball_pos < 3'd7) begin
+                            ball_pos <= ball_pos + 1'b1;
+
+                            if ((speed_level <= 4'd1) && ((travel_count + 1'b1) < MIN_CROSS_COUNT)) begin
+                                score2       <= score_inc_sat(score2);
+                                running      <= 1'b0;
+                                speed_level  <= 4'd1;
+                                travel_count <= 4'd0;
+                                beep_start   <= 1'b1;
+                            end else begin
+                                travel_count <= travel_count + 1'b1;
+                                if (speed_level > 4'd1)
+                                    speed_level <= speed_level - 1'b1;
+                                else
+                                    speed_level <= 4'd1;
+                            end
+                        end else begin
+                            score1       <= score_inc_sat(score1);
+                            running      <= 1'b0;
+                            speed_level  <= 4'd1;
+                            travel_count <= 4'd0;
+                            beep_start   <= 1'b1;
+                        end
+                    end else begin
+                        if (ball_pos > 3'd0) begin
+                            ball_pos <= ball_pos - 1'b1;
+
+                            if ((speed_level <= 4'd1) && ((travel_count + 1'b1) < MIN_CROSS_COUNT)) begin
+                                score1       <= score_inc_sat(score1);
+                                running      <= 1'b0;
+                                speed_level  <= 4'd1;
+                                travel_count <= 4'd0;
+                                beep_start   <= 1'b1;
+                            end else begin
+                                travel_count <= travel_count + 1'b1;
+                                if (speed_level > 4'd1)
+                                    speed_level <= speed_level - 1'b1;
+                                else
+                                    speed_level <= 4'd1;
+                            end
+                        end else begin
+                            score2       <= score_inc_sat(score2);
+                            running      <= 1'b0;
+                            speed_level  <= 4'd1;
+                            travel_count <= 4'd0;
+                            beep_start   <= 1'b1;
+                        end
+                    end
+                end
+            end
+        end
+    end
+endmodule
