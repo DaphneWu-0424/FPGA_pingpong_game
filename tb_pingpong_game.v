@@ -81,11 +81,11 @@ module tb_pingpong_game;
         @(negedge clk);
         kd2 = 1'b1;
 
-        // 场景2：左侧这次蓄力不足，球速衰减到0前未经过4个LED，判不过线，右侧加1分
+        // 场景2：左侧这次蓄力不足，只有当“本步后速度掉到0且仍未过线”时，才判不过线，右侧加1分
         wait (score2 == 7'd0);
         wait (led == 8'b0000_0001);
         @(posedge clk);
-        k1_charge_and_release(1);
+        k1_charge_and_release(3);
         wait (score2 == 7'd1);
 
         // 场景3：右侧故意提前释放，判提前击球，左侧加1分

@@ -1,10 +1,10 @@
 module pingpong_game #(
     parameter integer BALL_STEP_CYCLES = 3_000_000, //球移动一步所需的时钟周期数，决定基础速度
-    parameter integer DEBOUNCE_CYCLES  = 500_000, //按键消抖计数周期
+    parameter integer DEBOUNCE_CYCLES  = 500_000,   //按键消抖计数周期
     parameter integer BEEP_CYCLES      = 5_000_000, //蜂鸣器响持续时间
     parameter integer HOLD_UNIT_CYCLES = 2_000_000, //按键按住时间单位，用于计算速度等级
     parameter integer SPEED_LEVEL_MAX  = 7,
-    parameter integer MIN_CROSS_COUNT  = 4 //最低速时球必须移动的最小次数，否则不过线
+    parameter integer MIN_CROSS_COUNT  = 4          //最低速时球必须移动的最小次数，否则不过线
 )(
     input  wire        clk,
     input  wire        rst_n,
@@ -33,6 +33,9 @@ module pingpong_game #(
 
     wire [31:0] current_step_cycles;
     wire        step_tick;
+    wire [3:0]  travel_after_step;
+    wire [3:0]  speed_after_step;
+    wire        fail_to_cross_after_step;
 
     function [6:0] score_inc_sat;
         input [6:0] score_in;
@@ -75,21 +78,24 @@ module pingpong_game #(
         end
     endfunction
 
-    assign current_step_cycles = speed_to_step_cycles(speed_level);
-    assign step_tick           = running && (step_cnt >= current_step_cycles - 1'b1);
-    assign led                 = running ? (8'b0000_0001 << ball_pos) : 8'b0000_0000;
-    assign beep                = (beep_cnt != 32'd0);
+    assign current_step_cycles        = speed_to_step_cycles(speed_level);
+    assign step_tick                  = running && (step_cnt >= current_step_cycles - 1'b1);
+    assign travel_after_step          = travel_count + 1'b1;
+    assign speed_after_step           = (speed_level > 4'd0) ? (speed_level - 1'b1) : 4'd0;
+    assign fail_to_cross_after_step   = (speed_after_step < 4'd1) && (travel_after_step < MIN_CROSS_COUNT);
+    assign led                        = running ? (8'b0000_0001 << ball_pos) : 8'b0000_0000;
+    assign beep                       = (beep_cnt != 32'd0);
 
     key_processor #(
         .DEBOUNCE_CYCLES(DEBOUNCE_CYCLES)
     ) u_key_processor (
-        .clk             (clk),
-        .rst_n           (rst_n),
-        .kd1             (kd1),
-        .kd2             (kd2),
-        .flag_left       (flag_left),
-        .flag_right      (flag_right),
-        .hold_cycles_left(hold_cycles_left),
+        .clk              (clk),
+        .rst_n            (rst_n),
+        .kd1              (kd1),
+        .kd2              (kd2),
+        .flag_left        (flag_left),
+        .flag_right       (flag_right),
+        .hold_cycles_left (hold_cycles_left),
         .hold_cycles_right(hold_cycles_right)
     );
 
@@ -107,9 +113,10 @@ module pingpong_game #(
         end else if (step_restart) begin
             step_cnt <= 32'd0;
         end else if (step_tick) begin
-        //step tick在running=1且step_cnt >= current_step_cycles - 1时产生，表示球应移动一格
+            // step_tick在running=1且step_cnt >= current_step_cycles - 1时产生，表示球应移动一格
             step_cnt <= 32'd0;
-        end else begin //否则每个时钟加1
+        end else begin
+            // 否则每个时钟加1
             step_cnt <= step_cnt + 1'b1;
         end
     end
@@ -132,7 +139,7 @@ module pingpong_game #(
             running      <= 1'b0;
             dir          <= 1'b1;
             ball_pos     <= 3'd0;
-            speed_level  <= 4'd1;
+            speed_level  <= 4'd0;
             travel_count <= 4'd0;
             score1       <= 7'd0;
             score2       <= 7'd0;
@@ -144,7 +151,7 @@ module pingpong_game #(
 
             if (!running) begin
                 travel_count <= 4'd0;
-                speed_level  <= 4'd1;
+                speed_level  <= 4'd0;
 
                 if (flag_left) begin
                     running      <= 1'b1;
@@ -177,7 +184,7 @@ module pingpong_game #(
                     end else begin //否则提前击球，左侧玩家得分，游戏停止，蜂鸣器响
                         score1       <= score_inc_sat(score1);
                         running      <= 1'b0;
-                        speed_level  <= 4'd1;
+                        speed_level  <= 4'd0;
                         travel_count <= 4'd0;
                         beep_start   <= 1'b1;
                     end
@@ -191,7 +198,7 @@ module pingpong_game #(
                     end else begin
                         score2       <= score_inc_sat(score2);
                         running      <= 1'b0;
-                        speed_level  <= 4'd1;
+                        speed_level  <= 4'd0;
                         travel_count <= 4'd0;
                         beep_start   <= 1'b1;
                     end
@@ -200,14 +207,14 @@ module pingpong_game #(
                         if (ball_pos < 3'd7) begin
                             ball_pos <= ball_pos + 1'b1; //球的位置加一
 
-                            if ((speed_level <= 4'd1) && ((travel_count + 1'b1) < MIN_CROSS_COUNT)) begin
+                            if (fail_to_cross_after_step) begin
                                 score2       <= score_inc_sat(score2);
                                 running      <= 1'b0;
-                                speed_level  <= 4'd1;
-                                travel_count <= 4'd0;
+                                speed_level  <= 4'd0;
+                                travel_count <= travel_after_step;
                                 beep_start   <= 1'b1;
                             end else begin //否则travel_count加一，若速度大于一则速度减一
-                                travel_count <= travel_count + 1'b1;
+                                travel_count <= travel_after_step;
                                 if (speed_level > 4'd1)
                                     speed_level <= speed_level - 1'b1;
                                 else
@@ -216,7 +223,7 @@ module pingpong_game #(
                         end else begin
                             score1       <= score_inc_sat(score1);
                             running      <= 1'b0;
-                            speed_level  <= 4'd1;
+                            speed_level  <= 4'd0;
                             travel_count <= 4'd0;
                             beep_start   <= 1'b1;
                         end
@@ -224,14 +231,14 @@ module pingpong_game #(
                         if (ball_pos > 3'd0) begin
                             ball_pos <= ball_pos - 1'b1;
 
-                            if ((speed_level <= 4'd1) && ((travel_count + 1'b1) < MIN_CROSS_COUNT)) begin
+                            if (fail_to_cross_after_step) begin
                                 score1       <= score_inc_sat(score1);
                                 running      <= 1'b0;
-                                speed_level  <= 4'd1;
-                                travel_count <= 4'd0;
+                                speed_level  <= 4'd0;
+                                travel_count <= travel_after_step;
                                 beep_start   <= 1'b1;
                             end else begin
-                                travel_count <= travel_count + 1'b1;
+                                travel_count <= travel_after_step;
                                 if (speed_level > 4'd1)
                                     speed_level <= speed_level - 1'b1;
                                 else
@@ -240,7 +247,7 @@ module pingpong_game #(
                         end else begin
                             score2       <= score_inc_sat(score2);
                             running      <= 1'b0;
-                            speed_level  <= 4'd1;
+                            speed_level  <= 4'd0;
                             travel_count <= 4'd0;
                             beep_start   <= 1'b1;
                         end
