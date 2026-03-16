@@ -14,7 +14,7 @@ module pingpong_game #(
     output reg  [6:0]  score1,
     output reg  [6:0]  score2,
     output wire        beep,
-    output wire [41:0] seven_segment
+    output wire [13:0] seven_segment
 );
     wire        flag_left;
     wire        flag_right;
@@ -40,7 +40,7 @@ module pingpong_game #(
     function [6:0] score_inc_sat;
         input [6:0] score_in;
         begin
-            if (score_in < 7'd99)
+            if (score_in < 7'd9)
                 score_inc_sat = score_in + 1'b1;
             else
                 score_inc_sat = score_in;
