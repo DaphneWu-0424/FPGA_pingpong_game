@@ -3,6 +3,7 @@ module key_processor #(
 )(
     input  wire        clk,
     input  wire        rst_n,
+    input  wire        enable,
     input  wire        kd1,
     input  wire        kd2,
     output wire        flag_left,
@@ -15,6 +16,7 @@ module key_processor #(
     ) u_key_filter_left (
         .clk        (clk),
         .rst_n      (rst_n),
+        .enable     (enable),
         .key_n      (kd1),
         .flag       (flag_left),
         .hold_cycles(hold_cycles_left)
@@ -25,6 +27,7 @@ module key_processor #(
     ) u_key_filter_right (
         .clk        (clk),
         .rst_n      (rst_n),
+        .enable     (enable),
         .key_n      (kd2),
         .flag       (flag_right),
         .hold_cycles(hold_cycles_right)
@@ -37,6 +40,7 @@ module key_filter #(
 )(
     input  wire        clk,
     input  wire        rst_n,
+    input  wire        enable,
     input  wire        key_n,
     output wire        flag,
     output wire [31:0] hold_cycles
@@ -67,7 +71,7 @@ module key_filter #(
      * 这样 pingpong_game 在同一个 clk 上升沿就能看到 flag，
      * 从而在检测到提前击球时当拍立刻 running<=0、LED 全灭并加分。
      */
-    assign release_event = (state == S_PRESSED) && key_released;
+    assign release_event = enable && (state == S_PRESSED) && key_released;
     assign flag          = release_event;
     assign hold_cycles   = release_event ? hold_cnt : hold_cycles_latched;
 
@@ -83,6 +87,11 @@ module key_filter #(
 
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
+            state               <= S_IDLE;
+            cnt                 <= 32'd0;
+            hold_cnt            <= 32'd0;
+            hold_cycles_latched <= 32'd0;
+        end else if (!enable) begin
             state               <= S_IDLE;
             cnt                 <= 32'd0;
             hold_cnt            <= 32'd0;
@@ -139,7 +148,7 @@ module key_filter #(
                         end
                     end else begin
                         state <= S_PRESSED;
-                        cnt <= 32'd0;
+                        cnt   <= 32'd0;
                     end
                 end
 
