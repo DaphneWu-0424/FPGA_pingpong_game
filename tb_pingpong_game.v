@@ -9,7 +9,13 @@ module tb_pingpong_game;
     wire [6:0]  score1;
     wire [6:0]  score2;
     wire        beep;
-    wire [13:0] seven_segment;
+
+    // 595 数码管接口
+    wire        SI;
+    wire        RCK;
+    wire        SCK;
+    wire        seg_oe_n;
+    wire        dig_oe_n;
 
     localparam integer BALL_STEP_CYCLES = 3;
     localparam integer DEBOUNCE_CYCLES  = 2;
@@ -22,15 +28,19 @@ module tb_pingpong_game;
         .BEEP_CYCLES     (BEEP_CYCLES),
         .HOLD_UNIT_CYCLES(HOLD_UNIT_CYCLES)
     ) uut (
-        .clk          (clk),
-        .rst_n        (rst_n),
-        .kd1          (kd1),
-        .kd2          (kd2),
-        .led          (led),
-        .score1       (score1),
-        .score2       (score2),
-        .beep         (beep),
-        .seven_segment(seven_segment)
+        .clk      (clk),
+        .rst_n    (rst_n),
+        .kd1      (kd1),
+        .kd2      (kd2),
+        .led      (led),
+        .score1   (score1),
+        .score2   (score2),
+        .beep     (beep),
+        .SI       (SI),
+        .RCK      (RCK),
+        .SCK      (SCK),
+        .seg_oe_n (seg_oe_n),
+        .dig_oe_n (dig_oe_n)
     );
 
     always #10 clk = ~clk;
@@ -88,21 +98,23 @@ module tb_pingpong_game;
         k1_charge_and_release(3);
         wait (score2 == 7'd1);
 
-        // 场景3：右侧故意提前释放，判提前击球，左侧加1分
+        // 场景3：右侧发球后，左侧故意提前释放，判提前击球，右侧加分
         @(posedge clk);
         k2_charge_and_release(20);
         wait (led == 8'b0001_0000);
         k1_charge_and_release(2);
-        wait (score1 == 7'd1);
+        wait (score2 == 7'd2);
 
-        #200;
+        #1000000;
         $stop;
     end
 
     initial begin
-        $monitor("t=%0t rst_n=%b kd1=%b kd2=%b led=%b score1=%0d score2=%0d beep=%b pos=%0d dir=%b run=%b speed=%0d travel=%0d holdL=%0d holdR=%0d",
+        $monitor("t=%0t rst_n=%b kd1=%b kd2=%b led=%b score1=%0d score2=%0d beep=%b SI=%b RCK=%b SCK=%b pos=%0d dir=%b run=%b speed=%0d travel=%0d holdL=%0d holdR=%0d",
                  $time, rst_n, kd1, kd2, led, score1, score2, beep,
+                 SI, RCK, SCK,
                  uut.ball_pos, uut.dir, uut.running, uut.speed_level, uut.travel_count,
                  uut.hold_cycles_left, uut.hold_cycles_right);
     end
+
 endmodule

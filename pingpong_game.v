@@ -1,6 +1,6 @@
 module pingpong_game #(
-    parameter integer BALL_STEP_CYCLES = 3_000_000, //球移动一步所需的时钟周期数，决定基础速度
-    parameter integer DEBOUNCE_CYCLES  = 500_000,   //按键消抖计数周期
+    parameter integer BALL_STEP_CYCLES = 10_000_000, //球移动一步所需的时钟周期数，决定基础速度
+    parameter integer DEBOUNCE_CYCLES  = 100_000_000,   //按键消抖计数周期
     parameter integer BEEP_CYCLES      = 5_000_000, //蜂鸣器响持续时间
     parameter integer HOLD_UNIT_CYCLES = 2_000_000, //按键按住时间单位，用于计算速度等级
     parameter integer SPEED_LEVEL_MAX  = 7,
@@ -14,7 +14,11 @@ module pingpong_game #(
     output reg  [6:0]  score1,
     output reg  [6:0]  score2,
     output wire        beep,
-    output wire [13:0] seven_segment
+    output wire       SI,
+    output wire       RCK,
+    output wire       SCK,
+    output wire       seg_oe_n,
+    output wire       dig_oe_n
 );
     wire        flag_left;
     wire        flag_right;
@@ -102,7 +106,13 @@ module pingpong_game #(
     seven_tube_drive u_seven_tube_drive (
         .left_num     (score1),
         .right_num    (score2),
-        .seven_segment(seven_segment)
+        .clk      (clk),
+        .rst_n    (rst_n),
+        .SI       (SI),
+        .RCK      (RCK),
+        .SCK      (SCK),
+        .seg_oe_n (seg_oe_n),
+        .dig_oe_n (dig_oe_n)
     );
 
     always @(posedge clk or negedge rst_n) begin
