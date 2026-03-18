@@ -9,28 +9,36 @@ module tb_pingpong_game;
     wire [6:0]  score1;
     wire [6:0]  score2;
     wire        beep;
-    wire [13:0] seven_segment;
+    wire SI;
+    wire RCK;
+    wire SCK;
+    wire seg_oe_n;
+    wire dig_oe_n;
 
     localparam integer BALL_STEP_CYCLES = 3;
     localparam integer DEBOUNCE_CYCLES  = 2;
     localparam integer BEEP_CYCLES      = 4;
     localparam integer HOLD_UNIT_CYCLES = 4;
 
-    pingpong_game #(
+        pingpong_game #(
         .BALL_STEP_CYCLES(BALL_STEP_CYCLES),
         .DEBOUNCE_CYCLES (DEBOUNCE_CYCLES),
         .BEEP_CYCLES     (BEEP_CYCLES),
         .HOLD_UNIT_CYCLES(HOLD_UNIT_CYCLES)
     ) uut (
-        .clk          (clk),
-        .rst_n        (rst_n),
-        .kd1          (kd1),
-        .kd2          (kd2),
-        .led          (led),
-        .score1       (score1),
-        .score2       (score2),
-        .beep         (beep),
-        .seven_segment(seven_segment)
+        .clk      (clk),
+        .rst_n    (rst_n),
+        .kd1      (kd1),
+        .kd2      (kd2),
+        .led      (led),
+        .score1   (score1),
+        .score2   (score2),
+        .beep     (beep),
+        .SI       (SI),
+        .RCK      (RCK),
+        .SCK      (SCK),
+        .seg_oe_n (seg_oe_n),
+        .dig_oe_n (dig_oe_n)
     );
 
     always #10 clk = ~clk;

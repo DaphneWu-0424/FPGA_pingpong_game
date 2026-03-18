@@ -14,7 +14,11 @@ module pingpong_game #(
     output reg  [6:0]  score1,
     output reg  [6:0]  score2,
     output wire        beep,
-    output wire [13:0] seven_segment
+    output wire       SI,
+    output wire       RCK,
+    output wire       SCK,
+    output wire       seg_oe_n,
+    output wire       dig_oe_n
 );
     wire        flag_left;
     wire        flag_right;
@@ -105,9 +109,15 @@ module pingpong_game #(
     );
 
     seven_tube_drive u_seven_tube_drive (
-        .left_num     (score1),
-        .right_num    (score2),
-        .seven_segment(seven_segment)
+    .clk      (clk),
+    .rst_n    (rst_n),
+    .left_num (score1),
+    .right_num(score2),
+    .SI       (SI),
+    .RCK      (RCK),
+    .SCK      (SCK),
+    .seg_oe_n (seg_oe_n),
+    .dig_oe_n (dig_oe_n)
     );
 
     always @(posedge clk or negedge rst_n) begin
