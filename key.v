@@ -42,7 +42,7 @@ module key_filter #(
     input  wire        rst_n,
     input  wire        enable,
     input  wire        key_n,
-    output wire        flag,
+    output reg        flag,
     output wire [31:0] hold_cycles
 );
     localparam [1:0] S_IDLE      = 2'd0;
@@ -57,23 +57,10 @@ module key_filter #(
     reg [31:0] hold_cnt;
     reg [31:0] hold_cycles_latched;
 
-    wire key_pressed;
-    wire key_released;
-    wire release_event;
-
-    assign key_pressed  = (key_ff1 == 1'b0);
-    assign key_released = (key_ff1 == 1'b1);
-
-    /*
-     * 这里把 flag 做成组合事件信号：
-     * 只要“已确认处于按下态 S_PRESSED”且“当前同步后的按键已经释放”，
-     * flag 当拍就为 1。
-     * 这样 pingpong_game 在同一个 clk 上升沿就能看到 flag，
-     * 从而在检测到提前击球时当拍立刻 running<=0、LED 全灭并加分。
-     */
-    assign release_event = enable && (state == S_PRESSED) && key_released;
-    assign flag          = release_event;
-    assign hold_cycles   = release_event ? hold_cnt : hold_cycles_latched;
+    wire key_pressed = (key_ff1 == 1'b0);
+    wire key_released = (key_ff1 == 1'b1);
+    
+    assign hold_cycles   = hold_cycles_latched;
 
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
@@ -91,12 +78,15 @@ module key_filter #(
             cnt                 <= 32'd0;
             hold_cnt            <= 32'd0;
             hold_cycles_latched <= 32'd0;
+            flag                <= 1'b0;
         end else if (!enable) begin
             state               <= S_IDLE;
             cnt                 <= 32'd0;
             hold_cnt            <= 32'd0;
             hold_cycles_latched <= 32'd0;
+            flag                <= 1'b0;
         end else begin
+            flag                <= 1'b0; //默认拉低，只在合法释放完成时打一拍
             case (state)
                 S_IDLE: begin
                     cnt      <= 32'd0;
@@ -132,15 +122,16 @@ module key_filter #(
                         if (hold_cnt != 32'hffff_ffff)
                             hold_cnt <= hold_cnt + 1'b1;
                     end else begin
-                        hold_cycles_latched <= hold_cnt;
+                        hold_cycles_latched <= hold_cnt; //先锁存蓄力值
                         state               <= S_WAIT_HIGH;
-                        cnt                 <= 32'd0;
+                        cnt                 <= 32'd1; //开始做释放消抖
                     end
                 end
 
                 S_WAIT_HIGH: begin
                     if (key_released) begin
                         if ((DEBOUNCE_CYCLES <= 1) || (cnt >= DEBOUNCE_CYCLES - 1)) begin
+                            flag  <= 1'b1; //释放稳定后，才真正触发
                             state <= S_IDLE;
                             cnt   <= 32'd0;
                         end else begin
