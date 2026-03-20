@@ -9,7 +9,9 @@ module key_processor #(
     output wire        flag_left,
     output wire        flag_right,
     output wire [31:0] hold_cycles_left,
-    output wire [31:0] hold_cycles_right
+    output wire [31:0] hold_cycles_right,
+    output wire [31:0] hold_cycles_live_left,
+    output wire [31:0] hold_cycles_live_right
 );
     key_filter #(
         .DEBOUNCE_CYCLES(DEBOUNCE_CYCLES)
@@ -19,7 +21,8 @@ module key_processor #(
         .enable     (enable),
         .key_n      (kd1),
         .flag       (flag_left),
-        .hold_cycles(hold_cycles_left)
+        .hold_cycles(hold_cycles_left),
+        .hold_cycles_live(hold_cycles_live_left)
     );
 
     key_filter #(
@@ -30,7 +33,8 @@ module key_processor #(
         .enable     (enable),
         .key_n      (kd2),
         .flag       (flag_right),
-        .hold_cycles(hold_cycles_right)
+        .hold_cycles(hold_cycles_right),
+        .hold_cycles_live(hold_cycles_live_right)
     );
 endmodule
 
@@ -43,7 +47,8 @@ module key_filter #(
     input  wire        enable,
     input  wire        key_n,
     output reg        flag,
-    output wire [31:0] hold_cycles
+    output wire [31:0] hold_cycles,
+    output wire [31:0] hold_cycles_live
 );
     localparam [1:0] S_IDLE      = 2'd0;
     localparam [1:0] S_DB_PRESS  = 2'd1;
@@ -57,15 +62,16 @@ module key_filter #(
     reg [31:0] hold_cnt;
     reg [31:0] hold_cycles_latched;
 
-    wire key_pressed = (key_ff1 == 1'b0);
-    wire key_released = (key_ff1 == 1'b1);
+    wire key_pressed = (key_ff1 == 1'b1);
+    wire key_released = (key_ff1 == 1'b0);
     
     assign hold_cycles   = hold_cycles_latched;
+    assign hold_cycles_live = hold_cnt;
 
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
-            key_ff0 <= 1'b1;
-            key_ff1 <= 1'b1;
+            key_ff0 <= 1'b0;
+            key_ff1 <= 1'b0;
         end else begin
             key_ff0 <= key_n;
             key_ff1 <= key_ff0;
