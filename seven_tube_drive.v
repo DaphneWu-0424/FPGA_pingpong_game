@@ -1,8 +1,5 @@
-module seven_tube_drive #(
-    parameter integer CLK_FREQ_HZ   = 100_000_000,
-    parameter integer SHIFT_TICK_HZ = 200_000
-)(
-    input  wire       clk,
+module seven_tube_drive (
+    input  wire       clk,        // 100MHz
     input  wire       rst_n,
     input  wire [6:0] left_num,
     input  wire [6:0] right_num,
@@ -10,164 +7,134 @@ module seven_tube_drive #(
     output reg        SI,
     output reg        RCK,
     output reg        SCK,
-    output wire       seg_oe_n,   // 对应 595OE，低有效
-    output wire       dig_oe_n    // 数码位使能
+    output reg        dig_oe_n    // 板上唯一 OE，接 P8
 );
 
     // ----------------------------
-    // 1. 分数拆成十位/个位
+    // 1) 分数拆位
     // ----------------------------
     wire [3:0] left_tens;
     wire [3:0] left_ones;
     wire [3:0] right_tens;
     wire [3:0] right_ones;
 
-    assign left_tens  = (left_num  >= 7'd10) ? (left_num  / 10) : 4'hF;
+    assign left_tens  = left_num  / 10;
     assign left_ones  = left_num  % 10;
-    assign right_tens = (right_num >= 7'd10) ? (right_num / 10) : 4'hF;
+    assign right_tens = right_num / 10;
     assign right_ones = right_num % 10;
 
     // ----------------------------
-    // 2. 6位显示内容
-    //    从左到右：左十 左个 - - 右十 右个
-    //    对应老师例程常见习惯：
-    //    D6 D5 D4 D3 D2 D1
+    // 2) 段码
+    // 布局从左到右：
+    // D8 D7 D6 D5 D4 D3 D2 D1
+    // 空 空 左十 左个  -  - 右十 右个
     // ----------------------------
-    wire [7:0] seg_d1; // 最右：右个位
-    wire [7:0] seg_d2; // 右十位
-    wire [7:0] seg_d3; // -
-    wire [7:0] seg_d4; // -
-    wire [7:0] seg_d5; // 左个位
-    wire [7:0] seg_d6; // 左十位
-    wire [7:0] seg_d7; // 空白
-    wire [7:0] seg_d8; // 空白
+    wire [7:0] seg_d1;
+    wire [7:0] seg_d2;
+    wire [7:0] seg_d3;
+    wire [7:0] seg_d4;
+    wire [7:0] seg_d5;
+    wire [7:0] seg_d6;
+    wire [7:0] seg_d7;
+    wire [7:0] seg_d8;
 
     seg7_cc_encoder u_enc_d1 (.data(right_ones), .seg(seg_d1));
     seg7_cc_encoder u_enc_d2 (.data(right_tens), .seg(seg_d2));
-    seg7_cc_encoder u_enc_d3 (.data(4'hA),      .seg(seg_d3)); // '-'
-    seg7_cc_encoder u_enc_d4 (.data(4'hA),      .seg(seg_d4)); // '-'
-    seg7_cc_encoder u_enc_d5 (.data(left_ones), .seg(seg_d5));
-    seg7_cc_encoder u_enc_d6 (.data(left_tens), .seg(seg_d6));
-    seg7_cc_encoder u_enc_d7 (.data(4'hF),      .seg(seg_d7)); // blank
-    seg7_cc_encoder u_enc_d8 (.data(4'hF),      .seg(seg_d8)); // blank
+    seg7_cc_encoder u_enc_d3 (.data(4'hA),       .seg(seg_d3)); // '-'
+    seg7_cc_encoder u_enc_d4 (.data(4'hA),       .seg(seg_d4)); // '-'
+    seg7_cc_encoder u_enc_d5 (.data(left_ones),  .seg(seg_d5));
+    seg7_cc_encoder u_enc_d6 (.data(left_tens),  .seg(seg_d6));
+    seg7_cc_encoder u_enc_d7 (.data(4'hF),       .seg(seg_d7)); // blank
+    seg7_cc_encoder u_enc_d8 (.data(4'hF),       .seg(seg_d8)); // blank
 
     // ----------------------------
-    // 3. 拼成64位数据
-    // 老师例程里每位是8bit段码，8位总共64bit
-    // D1 在最低8位，D8 在最高8位
+    // 3) 拼成 64 位
+    // 和你原来一致：D1 最低字节，D8 最高字节
     // ----------------------------
-    wire [63:0] frame_data;
-    assign frame_data = {
+    wire [63:0] full_data;
+    assign full_data = {
         seg_d8, seg_d7, seg_d6, seg_d5,
         seg_d4, seg_d3, seg_d2, seg_d1
     };
 
     // ----------------------------
-    // 4. 时钟分频，产生移位节拍
+    // 4) 慢时钟分频
+    // 100MHz -> 大约 24.4kHz（参考陈菲菲）
     // ----------------------------
-    localparam integer SHIFT_DIV = (CLK_FREQ_HZ / SHIFT_TICK_HZ);
-    localparam [2:0] ST_LOAD  = 3'd0;
-    localparam [2:0] ST_SCK_L = 3'd1;
-    localparam [2:0] ST_SCK_H = 3'd2;
-    localparam [2:0] ST_LATCH = 3'd3;
-
-    reg [31:0] div_cnt;
-    reg        tick;
+    reg [11:0] div_cnt;
+    reg        slow_clk;
 
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
-            div_cnt <= 32'd0;
-            tick    <= 1'b0;
+            div_cnt   <= 12'd0;
+            slow_clk  <= 1'b0;
+        end else if (div_cnt == 12'd2047) begin
+            div_cnt   <= 12'd0;
+            slow_clk  <= ~slow_clk;
         end else begin
-            if (div_cnt >= SHIFT_DIV - 1) begin
-                div_cnt <= 32'd0;
-                tick    <= 1'b1;
-            end else begin
-                div_cnt <= div_cnt + 1'b1;
-                tick    <= 1'b0;
-            end
+            div_cnt   <= div_cnt + 1'b1;
         end
     end
 
     // ----------------------------
-    // 5. 64位移位发送到 595
+    // 5) 64位串行发送状态机
     // ----------------------------
-    reg [2:0]  state;
-    reg [63:0] shreg;
-    reg [6:0]  bit_cnt;
+    localparam S_SHIFT = 1'b0;
+    localparam S_LATCH = 1'b1;
 
-    assign seg_oe_n = 1'b0; // 595OE 低有效，常开
-    assign dig_oe_n = 1'b1; 
+    reg        state;
+    reg [5:0]  bit_cnt;
+    reg        phase;
 
-    always @(posedge clk or negedge rst_n) begin
+    always @(posedge slow_clk or negedge rst_n) begin
         if (!rst_n) begin
-            state   <= ST_LOAD;
-            shreg   <= 64'd0;
-            bit_cnt <= 7'd0;
-            SI      <= 1'b0;
-            SCK     <= 1'b0;
-            RCK     <= 1'b0;
-        end else if (tick) begin
+            state    <= S_SHIFT;
+            bit_cnt  <= 6'd0;
+            phase    <= 1'b0;
+            SI       <= 1'b0;
+            SCK      <= 1'b0;
+            RCK      <= 1'b0;
+
+            // 先按低有效常开写；如果还不亮，把这里改成 1'b1 再试一次
+            dig_oe_n <= 1'b0;
+        end else begin
             case (state)
-                ST_LOAD: begin
-                    shreg   <= frame_data;
-                    bit_cnt <= 7'd64;
-                    SI      <= frame_data[0];
-                    SCK     <= 1'b0;
-                    RCK     <= 1'b0;
-                    state   <= ST_SCK_H;
-                end
-
-                ST_SCK_H: begin
-                    SCK   <= 1'b1;   // 送出当前 SI
-                    RCK   <= 1'b0;
-                    state <= ST_SCK_L;
-                end
-
-                ST_SCK_L: begin
-                    SCK <= 1'b0;
+                S_SHIFT: begin
                     RCK <= 1'b0;
-
-                    shreg <= {1'b0, shreg[63:1]};
-                    bit_cnt <= bit_cnt - 1'b1;
-
-                    if (bit_cnt == 7'd1) begin
-                        SI    <= 1'b0;
-                        state <= ST_LATCH;
+                    if (phase == 1'b0) begin
+                        SI    <= full_data[bit_cnt];
+                        SCK   <= 1'b0;
+                        phase <= 1'b1;
                     end else begin
-                        SI    <= shreg[1];
-                        state <= ST_SCK_H;
+                        SCK   <= 1'b1;
+                        phase <= 1'b0;
+                        if (bit_cnt == 6'd63) begin
+                            state   <= S_LATCH;
+                            bit_cnt <= 6'd0;
+                        end else begin
+                            bit_cnt <= bit_cnt + 1'b1;
+                        end
                     end
                 end
 
-                ST_LATCH: begin
-                    RCK   <= 1'b1;   // 锁存到 595 输出
-                    SCK   <= 1'b0;
-                    SI    <= 1'b0;
-                    state <= ST_LOAD;
-                end
-
-                default: begin
-                    state <= ST_LOAD;
+                S_LATCH: begin
+                    SCK <= 1'b0;
+                    if (phase == 1'b0) begin
+                        RCK   <= 1'b1;
+                        phase <= 1'b1;
+                    end else begin
+                        RCK   <= 1'b0;
+                        phase <= 1'b0;
+                        state <= S_SHIFT;
+                    end
                 end
             endcase
-        end else begin
-            // 让 RCK 只保持一个 tick 宽度
-            if (state != ST_LATCH)
-                RCK <= 1'b0;
         end
     end
 
 endmodule
 
 
-// ======================================================
-// 共阴数码管编码器：高电平点亮
-// seg = {a,b,c,d,e,f,g,dp}
-// 4'hA -> '-'
-// 4'hF -> blank
-// 编码风格与老师给的 DELED.vhd 一致
-// ======================================================
 module seg7_cc_encoder (
     input  wire [3:0] data,
     output reg  [7:0] seg
@@ -184,11 +151,9 @@ module seg7_cc_encoder (
             4'h7: seg = 8'b11100000;
             4'h8: seg = 8'b11111110;
             4'h9: seg = 8'b11110110;
-            4'hA: seg = 8'b00000010; // 只亮 g 段，显示 '-'
-            4'hF: seg = 8'b00000000;
+            4'hA: seg = 8'b00000010; // '-'
+            4'hF: seg = 8'b00000000; // blank
             default: seg = 8'b00000000;
         endcase
     end
 endmodule
-
-

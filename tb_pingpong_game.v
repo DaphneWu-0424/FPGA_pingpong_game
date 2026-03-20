@@ -1,6 +1,7 @@
 `timescale 1ns/1ps
 
-module tb_pingpong_game_scoring;
+module tb_pingpong_game_rewrite;
+
     reg clk;
     reg rst_n;
     reg kd1;
@@ -13,176 +14,99 @@ module tb_pingpong_game_scoring;
     wire SI;
     wire RCK;
     wire SCK;
-    wire seg_oe_n;
     wire dig_oe_n;
 
-    // 100MHz
+    // 为了加快仿真，把大计数参数都压小
+    pingpong_game #(
+        .BALL_STEP_CYCLES   (20),
+        .DEBOUNCE_CYCLES    (4),
+        .BEEP_CYCLES        (20),
+        .HOLD_UNIT_CYCLES   (8),
+        .SPEED_LEVEL_MAX    (7),
+        .MIN_CROSS_COUNT    (4),
+        .SCORE_PAUSE_CYCLES (30)
+    ) uut (
+        .clk      (clk),
+        .rst_n    (rst_n),
+        .kd1      (kd1),
+        .kd2      (kd2),
+        .led      (led),
+        .score1   (score1),
+        .score2   (score2),
+        .beep     (beep),
+        .SI       (SI),
+        .RCK      (RCK),
+        .SCK      (SCK),
+        .dig_oe_n (dig_oe_n)
+    );
+
+    // 方便观察内部状态
+    wire        running           = uut.running;
+    wire        dir               = uut.dir;
+    wire [2:0]  ball_pos          = uut.ball_pos;
+    wire        flag_left         = uut.flag_left;
+    wire        flag_right        = uut.flag_right;
+    wire [31:0] hold_cycles_left  = uut.hold_cycles_left;
+    wire [31:0] hold_cycles_right = uut.hold_cycles_right;
+    wire [3:0]  speed_level       = uut.speed_level;
+    wire [31:0] step_cycles       = uut.step_cycles;
+    wire [63:0] frame_data        = uut.u_seven_tube_drive.full_data;
+
+    // 100MHz 时钟
     initial clk = 1'b0;
     always #5 clk = ~clk;
 
-    // 缩小参数，专门做仿真
-    pingpong_game #(
-        .BALL_STEP_CYCLES(20),
-        .DEBOUNCE_CYCLES(3),
-        .BEEP_CYCLES(20),
-        .HOLD_UNIT_CYCLES(8),
-        .SPEED_LEVEL_MAX(7),
-        .MIN_CROSS_COUNT(2)
-    ) uut (
-        .clk(clk),
-        .rst_n(rst_n),
-        .kd1(kd1),
-        .kd2(kd2),
-        .led(led),
-        .score1(score1),
-        .score2(score2),
-        .beep(beep),
-        .SI(SI),
-        .RCK(RCK),
-        .SCK(SCK),
-        .seg_oe_n(seg_oe_n),
-        .dig_oe_n(dig_oe_n)
-    );
-
-    // 方便看内部状态
-    wire running   = uut.running;
-    wire dir       = uut.dir;
-    wire [2:0] ball_pos = uut.ball_pos;
-    wire flag_left  = uut.flag_left;
-    wire flag_right = uut.flag_right;
-    wire [63:0] frame_data = uut.u_seven_tube_drive.frame_data;
-
-    // 串行捕获
-    reg [63:0] cap_shift;
-    reg [6:0]  cap_cnt;
-
-    function [7:0] bitrev8;
-        input [7:0] x;
-        begin
-            bitrev8 = {x[0],x[1],x[2],x[3],x[4],x[5],x[6],x[7]};
-        end
-    endfunction
-
-    function [63:0] cap_to_frame;
-        input [63:0] cap;
-        begin
-            cap_to_frame = {
-                bitrev8(cap[7:0]),
-                bitrev8(cap[15:8]),
-                bitrev8(cap[23:16]),
-                bitrev8(cap[31:24]),
-                bitrev8(cap[39:32]),
-                bitrev8(cap[47:40]),
-                bitrev8(cap[55:48]),
-                bitrev8(cap[63:56])
-            };
-        end
-    endfunction
-
-    task press_left_and_release;
-        input integer hold_cycles;
+    // 按键：低电平按下，高电平松开
+    task press_left;
+        input integer hold_clk_cycles;
         integer i;
         begin
             @(negedge clk);
             kd1 = 1'b0;
-            for (i = 0; i < hold_cycles; i = i + 1)
+            for (i = 0; i < hold_clk_cycles; i = i + 1)
                 @(negedge clk);
             kd1 = 1'b1;
+            repeat (12) @(negedge clk);
         end
     endtask
 
-    task press_right_and_release;
-        input integer hold_cycles;
+    task press_right;
+        input integer hold_clk_cycles;
         integer i;
         begin
             @(negedge clk);
             kd2 = 1'b0;
-            for (i = 0; i < hold_cycles; i = i + 1)
+            for (i = 0; i < hold_clk_cycles; i = i + 1)
                 @(negedge clk);
             kd2 = 1'b1;
+            repeat (12) @(negedge clk);
         end
     endtask
 
-    task wait_latchs;
-        input integer n;
-        integer i;
+    // 等球到最左/最右，方便做“到位击球”测试
+    task wait_ball_at_left;
         begin
-            for (i = 0; i < n; i = i + 1)
-                @(posedge RCK);
+            while (!(running && !dir && ball_pos == 3'd0))
+                @(posedge clk);
+            repeat (2) @(posedge clk);
         end
     endtask
 
-    task show_display;
-        reg [63:0] recovered;
+    task wait_ball_at_right;
         begin
-            recovered = cap_to_frame(cap_shift);
-            $display("[DISPLAY t=%0t] score1=%0d score2=%0d frame=%h recov=%h",
-                     $time, score1, score2, frame_data, recovered);
-            $display("[FRAME bytes] D8=%02h D7=%02h D6=%02h D5=%02h D4=%02h D3=%02h D2=%02h D1=%02h",
-                     frame_data[63:56], frame_data[55:48], frame_data[47:40], frame_data[39:32],
-                     frame_data[31:24], frame_data[23:16], frame_data[15:8], frame_data[7:0]);
+            while (!(running && dir && ball_pos == 3'd7))
+                @(posedge clk);
+            repeat (2) @(posedge clk);
         end
     endtask
+
+    // 监视数码管串行输出：在 SCK 上升沿采样 SI，RCK 上升沿打印一帧
+    reg [63:0] cap_shift;
+    reg [6:0]  cap_cnt;
 
     initial begin
-        rst_n = 1'b0;
-        kd1   = 1'b1;
-        kd2   = 1'b1;
         cap_shift = 64'd0;
         cap_cnt   = 7'd0;
-
-        repeat (5) @(negedge clk);
-        rst_n = 1'b1;
-
-        $display("==== CASE1: left serve, right successful return ====");
-        press_left_and_release(12);
-
-        wait (running == 1'b1);
-        $display("[RUNNING t=%0t] started dir=%0d ball_pos=%0d led=%b", $time, dir, ball_pos, led);
-
-        // 提前按住右键，等球到最右端再松开，确保是“松开击球”
-        wait (ball_pos == 3'd5 && dir == 1'b1 && running == 1'b1);
-        @(negedge clk);
-        kd2 = 1'b0;
-        $display("[RIGHT HOLD t=%0t] kd2 down at pos=%0d led=%b", $time, ball_pos, led);
-
-        wait (ball_pos == 3'd7 && dir == 1'b1 && running == 1'b1);
-        @(negedge clk);
-        kd2 = 1'b1;
-        $display("[RIGHT RELEASE t=%0t] kd2 up at pos=%0d led=%b", $time, ball_pos, led);
-
-        // 检查是否真的反向成功
-        wait (dir == 1'b0 || running == 1'b0);
-        if (running && dir == 1'b0)
-            $display("[PASS] right return success at t=%0t, ball_pos=%0d led=%b", $time, ball_pos, led);
-        else
-            $display("[FAIL] right return failed at t=%0t, running=%b dir=%b score1=%0d score2=%0d", $time, running, dir, score1, score2);
-
-        // 不再接左侧，让右侧这次回球最终造成一分，验证计分和数码管
-        wait (score1 == 7'd1 || score2 == 7'd1);
-        $display("[SCORE CHANGE t=%0t] score1=%0d score2=%0d led=%b running=%b", $time, score1, score2, led, running);
-        wait_latchs(2);
-        show_display();
-
-        $display("FINAL: score1=%0d score2=%0d led=%b running=%b dir=%b ball_pos=%0d", score1, score2, led, running, dir, ball_pos);
-        #200;
-        $finish;
-    end
-
-    // 仿真超时保护：给更长时间，避免误杀
-    initial begin
-        #2_000_000;
-        $display("[TIMEOUT t=%0t] simulation timeout", $time);
-        $display("FINAL timeout: score1=%0d score2=%0d led=%b running=%b dir=%b ball_pos=%0d", score1, score2, led, running, dir, ball_pos);
-        $finish;
-    end
-
-    always @(posedge clk) begin
-        if (flag_left || flag_right) begin
-            $display("[FLAG t=%0t] left=%b right=%b running=%b dir=%b pos=%0d holdL=%0d holdR=%0d",
-                     $time, flag_left, flag_right, running, dir, ball_pos,
-                     uut.hold_cycles_left, uut.hold_cycles_right);
-        end
     end
 
     always @(posedge SCK) begin
@@ -192,9 +116,110 @@ module tb_pingpong_game_scoring;
     end
 
     always @(posedge RCK) begin
-        $display("[LATCH t=%0t] score1=%0d score2=%0d seg_oe_n=%b dig_oe_n=%b cap_cnt=%0d frame=%h",
-                 $time, score1, score2, seg_oe_n, dig_oe_n, cap_cnt, frame_data);
+        $display("[LATCH t=%0t] oe=%b frame=%h cap=%h bits=%0d score1=%0d score2=%0d",
+                 $time, dig_oe_n, frame_data, cap_shift, cap_cnt, score1, score2);
         cap_cnt <= 7'd0;
+    end
+
+    // 只在关键状态变化时打印，避免刷屏
+    reg        running_d;
+    reg        dir_d;
+    reg [2:0]  ball_pos_d;
+    reg [7:0]  led_d;
+    reg [6:0]  score1_d;
+    reg [6:0]  score2_d;
+    reg        beep_d;
+    reg [3:0]  speed_level_d;
+    reg [31:0] step_cycles_d;
+
+    initial begin
+        running_d     = 1'b0;
+        dir_d         = 1'b0;
+        ball_pos_d    = 3'd0;
+        led_d         = 8'd0;
+        score1_d      = 7'd0;
+        score2_d      = 7'd0;
+        beep_d        = 1'b0;
+        speed_level_d = 4'd0;
+        step_cycles_d = 32'd0;
+    end
+
+    always @(posedge clk) begin
+        if (flag_left || flag_right) begin
+            $display("[FLAG  t=%0t] left=%b right=%b holdL=%0d holdR=%0d run=%b dir=%b pos=%0d spd=%0d step=%0d",
+                     $time, flag_left, flag_right, hold_cycles_left, hold_cycles_right,
+                     running, dir, ball_pos, speed_level, step_cycles);
+        end
+
+        if ((running     !== running_d)     ||
+            (dir         !== dir_d)         ||
+            (ball_pos    !== ball_pos_d)    ||
+            (led         !== led_d)         ||
+            (score1      !== score1_d)      ||
+            (score2      !== score2_d)      ||
+            (beep        !== beep_d)        ||
+            (speed_level !== speed_level_d) ||
+            (step_cycles !== step_cycles_d)) begin
+
+            $display("[STATE t=%0t] run=%b dir=%b pos=%0d led=%b score1=%0d score2=%0d beep=%b spd=%0d step=%0d",
+                     $time, running, dir, ball_pos, led, score1, score2, beep, speed_level, step_cycles);
+
+            running_d     <= running;
+            dir_d         <= dir;
+            ball_pos_d    <= ball_pos;
+            led_d         <= led;
+            score1_d      <= score1;
+            score2_d      <= score2;
+            beep_d        <= beep;
+            speed_level_d <= speed_level;
+            step_cycles_d <= step_cycles;
+        end
+    end
+
+    initial begin
+        rst_n = 1'b0;
+        kd1   = 1'b1;
+        kd2   = 1'b1;
+
+        repeat (10) @(negedge clk);
+        rst_n = 1'b1;
+        repeat (10) @(negedge clk);
+
+        // CASE1：左边长按发球，应该明显“先快后慢”
+        $display("\n==== CASE1: 左边长按发球，观察先快后慢 ====");
+        press_left(40);
+        repeat (220) @(negedge clk);
+
+        // CASE2：等待球真正到右端，再右边回球
+        $display("\n==== CASE2: 右边到位后回球 ====");
+        wait_ball_at_right();
+        press_right(40);
+        repeat (220) @(negedge clk);
+
+        // CASE3：左边提前击球，应该判右方得分
+        $display("\n==== CASE3: 左边提前击球，右方得分 ====");
+        press_left(24);
+        repeat (20) @(negedge clk);
+        press_left(10);
+        repeat (120) @(negedge clk);
+
+        // CASE4：重新发球后，右边提前击球，应该判左方得分
+        $display("\n==== CASE4: 右边提前击球，左方得分 ====");
+        press_left(24);
+        repeat (30) @(negedge clk);
+        press_right(12);
+        repeat (120) @(negedge clk);
+
+        $display("\n==== FINAL ====");
+        $display("score1=%0d score2=%0d led=%b beep=%b running=%b dir=%b pos=%0d spd=%0d step=%0d",
+                 score1, score2, led, beep, running, dir, ball_pos, speed_level, step_cycles);
+        $finish;
+    end
+
+    initial begin
+        #500000;
+        $display("[TIMEOUT] simulation timeout");
+        $finish;
     end
 
 endmodule
