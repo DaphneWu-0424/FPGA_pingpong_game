@@ -2,7 +2,7 @@ module pingpong_game #(
     parameter integer BALL_STEP_CYCLES = 3_000_000, //球移动一步所需的时钟周期数，决定基础速度
     parameter integer DEBOUNCE_CYCLES  = 500_000,   //按键消抖计数周期
     parameter integer BEEP_CYCLES      = 50_000_000, //蜂鸣器响持续时间
-    parameter integer HOLD_UNIT_CYCLES = 2_000_000, //按键按住时间单位，用于计算速度等级
+    parameter integer HOLD_UNIT_CYCLES = 100_000_000, //按键按住时间单位，用于计算速度等级
     parameter integer SPEED_LEVEL_MAX  = 7,
     parameter integer MIN_CROSS_COUNT  = 4          //最低速时球必须移动的最小次数，否则不过线
 )(
@@ -10,7 +10,7 @@ module pingpong_game #(
     input  wire        rst_n,
     input  wire        kd1,
     input  wire        kd2,
-    output wire [7:0]  led,
+    output wire [15:0]  led,
     output reg  [6:0]  score1,
     output reg  [6:0]  score2,
     output wire        beep,
@@ -24,6 +24,14 @@ module pingpong_game #(
     wire        flag_right;
     wire [31:0] hold_cycles_left;
     wire [31:0] hold_cycles_right;
+    wire [31:0] hold_cycles_live_left;
+    wire [31:0] hold_cycles_live_right;
+
+    wire [31:0] hold_cycles_live_dbg;
+    wire [2:0]  charge_bar_level;
+    wire        charge_bar_active;
+    wire [6:0]  led_bar;
+    wire [7:0]  led_ball;
 
     reg         running; //游戏运行状态，1表示游戏中，0表示等待发球
     reg         dir;
@@ -70,6 +78,38 @@ module pingpong_game #(
         end
     endfunction
 
+        function [2:0] hold_to_bar_level;
+        input [31:0] hold_cycles_in;
+        reg   [31:0] q;
+        begin
+            if (HOLD_UNIT_CYCLES <= 0) begin
+                hold_to_bar_level = 3'd7;
+            end else begin
+                q = hold_cycles_in / HOLD_UNIT_CYCLES;
+                if (q >= 7)
+                    hold_to_bar_level = 3'd7;
+                else
+                    hold_to_bar_level = q[2:0];
+            end
+        end
+    endfunction
+
+    function [6:0] bar_to_led;
+        input [2:0] level;
+        begin
+            case (level)
+                3'd0: bar_to_led = 7'b0000000;
+                3'd1: bar_to_led = 7'b0000001;
+                3'd2: bar_to_led = 7'b0000011;
+                3'd3: bar_to_led = 7'b0000111;
+                3'd4: bar_to_led = 7'b0001111;
+                3'd5: bar_to_led = 7'b0011111;
+                3'd6: bar_to_led = 7'b0111111;
+                default: bar_to_led = 7'b1111111;
+            endcase
+        end
+    endfunction
+
     function [31:0] speed_to_step_cycles; //将速度等级转换为步进所需的时钟周期数
         input [3:0] spd;
         reg   [31:0] factor;
@@ -85,14 +125,28 @@ module pingpong_game #(
         end
     endfunction
 
-    assign current_step_cycles        = speed_to_step_cycles(speed_level);
-    assign step_tick                  = running && (step_cnt >= current_step_cycles - 1'b1);
-    assign travel_after_step          = travel_count + 1'b1;
-    assign speed_after_step           = (speed_level > 4'd0) ? (speed_level - 1'b1) : 4'd0;
-    assign fail_to_cross_after_step   = (speed_after_step < 4'd1) && (travel_after_step < MIN_CROSS_COUNT);
-    assign led                        = running ? (8'b0000_0001 << ball_pos) : 8'b0000_0000;
-    assign beep                       = (beep_cnt != 32'd0);
-    assign key_enable                 = !score_pause;
+    assign current_step_cycles      = speed_to_step_cycles(speed_level);
+    assign step_tick                = running && (step_cnt >= current_step_cycles - 1'b1);
+    assign travel_after_step        = travel_count + 1'b1;
+    assign speed_after_step         = (speed_level > 4'd0) ? (speed_level - 1'b1) : 4'd0;
+    assign fail_to_cross_after_step = (speed_after_step < 4'd1) && (travel_after_step < MIN_CROSS_COUNT);
+    assign beep                     = (beep_cnt != 32'd0);
+    assign key_enable               = !score_pause;
+
+    // 取一个当前调试显示的蓄力源：优先左键，其次右键
+    assign hold_cycles_live_dbg = (hold_cycles_live_left  != 32'd0) ? hold_cycles_live_left  :
+                                (hold_cycles_live_right != 32'd0) ? hold_cycles_live_right :
+                                32'd0;
+
+    assign charge_bar_level  = hold_to_bar_level(hold_cycles_live_dbg);
+    assign charge_bar_active = (hold_cycles_live_dbg != 32'd0);
+    assign led_bar           = bar_to_led(charge_bar_level);
+    assign led_ball          = running ? (8'b0000_0001 << ball_pos) : 8'b0000_0000;
+
+    // LED分区显示：低8位球，高7位蓄力，最高位做状态灯
+    assign led[7:0]   = led_ball;
+    assign led[14:8]  = led_bar;
+    assign led[15]    = charge_bar_active;
 
     key_processor #(
         .DEBOUNCE_CYCLES(DEBOUNCE_CYCLES)
@@ -105,7 +159,9 @@ module pingpong_game #(
         .flag_left        (flag_left),
         .flag_right       (flag_right),
         .hold_cycles_left (hold_cycles_left),
-        .hold_cycles_right(hold_cycles_right)
+        .hold_cycles_right(hold_cycles_right),
+        .hold_cycles_live_left (hold_cycles_live_left),
+        .hold_cycles_live_right(hold_cycles_live_right)
     );
 
     seven_tube_drive u_seven_tube_drive (
